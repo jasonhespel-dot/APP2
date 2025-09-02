@@ -1,0 +1,66 @@
+name: Build STRØ8 (APK) — portable
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      # Unifie les deux variables pour éviter les conflits de SDK
+      - name: Prepare Android SDK env
+        run: |
+          echo "ANDROID_SDK_ROOT=${GITHUB_WORKSPACE}/android-sdk" >> $GITHUB_ENV
+          echo "ANDROID_HOME=${GITHUB_WORKSPACE}/android-sdk" >> $GITHUB_ENV
+          mkdir -p "${GITHUB_WORKSPACE}/android-sdk/cmdline-tools"
+
+      - name: Install Android cmdline-tools
+        run: |
+          set -e
+          cd "${GITHUB_WORKSPACE}/android-sdk/cmdline-tools"
+          curl -sSL -o cmdline-tools.zip https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
+          unzip -q cmdline-tools.zip
+          mv cmdline-tools latest
+          echo "${GITHUB_WORKSPACE}/android-sdk/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
+
+      - name: Accept SDK licenses (retry)
+        run: |
+          set -e
+          for i in 1 2 3; do
+            yes | sdkmanager --licenses && break || (echo "Retry licenses ($i)..." && sleep 5)
+          done
+
+      - name: Install required SDK packages
+        run: |
+          set -e
+          for i in 1 2 3; do
+            sdkmanager "platform-tools" "build-tools;34.0.0" "platforms;android-34" && break || (echo "Retry packages ($i)..." && sleep 8)
+          done
+          echo "${GITHUB_WORKSPACE}/android-sdk/platform-tools" >> "$GITHUB_PATH"
+
+      - name: Download Gradle 8.7 (no cache)
+        run: |
+          curl -sSL -o gradle.zip https://services.gradle.org/distributions/gradle-8.7-bin.zip
+          unzip -q gradle.zip
+          echo "${GITHUB_WORKSPACE}/gradle-8.7/bin" >> $GITHUB_PATH
+          gradle --version
+
+      - name: Build APK
+        run: gradle --no-daemon :app:assembleDebug
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: STR08-APK
+          path: app/build/outputs/apk/debug/app-debug.apk
